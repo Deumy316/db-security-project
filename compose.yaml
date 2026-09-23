@@ -1,0 +1,11 @@
+services:
+  gigang-api:
+    build: .
+    container_name: gigang-api
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    ports:
+      - "5000:5000"

@@ -1,15 +1,15 @@
 from flask import Flask, jsonify, request, render_template_string
 from datetime import datetime
-import getpass
 import os
 import re
 import mysql.connector
 
 app = Flask(__name__)
 
-DB_HOST = "localhost"
-DB_PORT = 3306
-DB_USER = "gigang_reader"
+DB_HOST = os.environ.get("GIGANG_DB_HOST", "localhost")
+DB_PORT = int(os.environ.get("GIGANG_DB_PORT", "3306"))
+DB_USER = os.environ.get("GIGANG_DB_USER", "gigang_reader")
+DB_PASSWORD = os.environ.get("GIGANG_DB_PASSWORD")
 
 API_KEY = os.environ.get("GIGANG_API_KEY")
 
@@ -26,8 +26,6 @@ SENSITIVE_TABLES = (
     "salary_2026",
     "secret_key",
 )
-
-DB_PASSWORD = None
 
 
 def check_api_key():
@@ -523,7 +521,8 @@ if __name__ == "__main__":
     if not API_KEY:
         raise RuntimeError("GIGANG_API_KEY 환경변수가 설정되지 않았습니다.")
 
-    DB_PASSWORD = getpass.getpass("MySQL gigang_reader 비밀번호: ")
+    if not DB_PASSWORD:
+        raise RuntimeError("GIGANG_DB_PASSWORD 환경변수가 설정되지 않았습니다.")
 
     app.run(
         host="0.0.0.0",
