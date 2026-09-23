@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+data/*.csv
+data/.access_log_*.tmp
+.env
+.env.*
+!.env.example
+*.pyc
+.pytest_cache/
+data/mysql_audit_log.csv
