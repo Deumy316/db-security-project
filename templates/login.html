@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>기강 DB Portal</title>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: white;
+        }
+
+        .wrap {
+            width: 420px;
+            margin: 120px auto;
+            background: #111827;
+            border: 1px solid #374151;
+            padding: 32px;
+            border-radius: 12px;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        input {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 14px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            cursor: pointer;
+        }
+
+        .error {
+            margin-top: 15px;
+            color: #f87171;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="wrap">
+        <h1>기강 DB Portal</h1>
+        <p>사내 데이터베이스 조회 시스템</p>
+
+        <form method="post">
+            <input type="text" name="username" placeholder="사용자 ID" required>
+
+            <input type="password" name="password" placeholder="비밀번호" required>
+
+            <button type="submit">
+                로그인
+            </button>
+        </form>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+    </div>
+
+</body>
+
+</html>

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>기강 DB Portal</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 30px;
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+        }
+
+        .top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .user {
+            color: #93c5fd;
+        }
+
+        a {
+            color: #f87171;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 25px;
+        }
+
+        th,
+        td {
+            border: 1px solid #374151;
+            padding: 10px;
+            text-align: left;
+        }
+
+        th {
+            background: #1f2937;
+        }
+
+        tr:nth-child(even) {
+            background: #172033;
+        }
+
+        .notice {
+            margin-top: 15px;
+            color: #94a3b8;
+        }
+
+        .search-box {
+            margin-top: 25px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .search-box select,
+        .search-box input,
+        .search-box button,
+        .all-button {
+            padding: 10px 14px;
+        }
+
+        .search-box input {
+            width: 280px;
+        }
+
+        .all-button {
+            background: #374151;
+            color: white;
+            text-decoration: none;
+        }
+
+        .download-button {
+            padding: 10px 14px;
+            background: #166534;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+        }
+
+        .download-button:hover {
+            background: #15803d;
+        }
+
+        th {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th:hover {
+            background: #334155;
+        }
+
+        th.sort-asc::after {
+            content: " ▲";
+        }
+
+        th.sort-desc::after {
+            content: " ▼";
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="top">
+        <div>
+            <h1>기강 DB 조회 시스템</h1>
+
+            <div class="user">
+                로그인 사용자: {{ username }}
+            </div>
+        </div>
+
+        <form method="get" action="/db" class="search-box">
+
+            <select name="search_type">
+                <option value="name" {% if search_type=="name" %}selected{% endif %}>
+                    고객명
+                </option>
+
+                <option value="id" {% if search_type=="id" %}selected{% endif %}>
+                    고객번호
+                </option>
+            </select>
+
+            <input type="text" name="keyword" value="{{ keyword }}" placeholder="검색어 입력">
+
+            <input type="hidden" name="search" value="1">
+
+            <button type="submit">
+                조회
+            </button>
+
+            <a href="/db?search=1" class="all-button">
+                전체 조회
+            </a>
+
+            <a href="/db/download?search_type={{ search_type }}&keyword={{ keyword }}" class="download-button">
+                엑셀 다운로드
+            </a>
+
+        </form>
+
+        <a href="/logout">로그아웃</a>
+    </div>
+
+    <div class="notice">
+        민감 고객정보 조회 결과 | 최대 50건 | 조회 건수: {{ rows|length }}건
+    </div>
+
+    <table id="customerTable">
+        <thead>
+            <tr>
+                <th data-type="number">고객번호</th>
+                <th data-type="string">고객명</th>
+                <th data-type="string">주민등록번호</th>
+                <th data-type="string">휴대전화</th>
+                <th data-type="string">이메일</th>
+                <th data-type="string">주소</th>
+                <th data-type="string">계좌번호</th>
+                <th data-type="string">신용카드번호</th>
+                <th data-type="number">잔액</th>
+                <th data-type="grade">고객등급</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+                <td>{{ row[2] }}</td>
+                <td>{{ row[3] }}</td>
+                <td>{{ row[4] }}</td>
+                <td>{{ row[5] }}</td>
+                <td>{{ row[6] }}</td>
+                <td>{{ row[7] }}</td>
+                <td>{{ row[8] }}</td>
+                <td>{{ row[9] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var table = document.getElementById("customerTable");
+
+            if (!table) {
+                return;
+            }
+
+            var headers = table.querySelectorAll("thead th");
+            var tbody = table.querySelector("tbody");
+
+            headers.forEach(function (header, columnIndex) {
+                var ascending = true;
+
+                header.addEventListener("click", function () {
+                    var rows = Array.from(tbody.querySelectorAll("tr"));
+                    var type = header.getAttribute("data-type");
+
+                    rows.sort(function (a, b) {
+                        var aText = a.children[columnIndex].innerText.trim();
+                        var bText = b.children[columnIndex].innerText.trim();
+
+                        if (type === "grade") {
+                            var gradeOrder = {
+                                "VIP": 1,
+                                "GOLD": 2,
+                                "SILVER": 3,
+                                "NORMAL": 4
+                            };
+
+                            var aGrade = gradeOrder[aText] || 99;
+                            var bGrade = gradeOrder[bText] || 99;
+
+                            if (ascending) {
+                                return aGrade - bGrade;
+                            }
+
+                            return bGrade - aGrade;
+                        }
+
+                        return ascending
+                            ? aText.localeCompare(bText, "ko")
+                            : bText.localeCompare(aText, "ko");
+                    });
+
+                    tbody.innerHTML = "";
+
+                    rows.forEach(function (row) {
+                        tbody.appendChild(row);
+                    });
+
+                    headers.forEach(function (item) {
+                        item.classList.remove(
+                            "sort-asc",
+                            "sort-desc"
+                        );
+                    });
+
+                    header.classList.add(
+                        ascending ? "sort-asc" : "sort-desc"
+                    );
+
+                    ascending = !ascending;
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>

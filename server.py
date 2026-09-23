@@ -1,10 +1,25 @@
-from flask import Flask, jsonify, request, render_template_string
-from datetime import datetime
+from flask import (
+    Flask,
+    jsonify,
+    request,
+    render_template,
+    render_template_string,
+    redirect,
+    url_for,
+    session,
+    send_file,
+)
+from datetime import datetime, timedelta
 import os
+import io
+import xlsxwriter
 import re
 import mysql.connector
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("GIGANG_SECRET_KEY", "dev-only-secret")
+app.permanent_session_lifetime = timedelta(minutes=15)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
 DB_HOST = os.environ.get("GIGANG_DB_HOST", "localhost")
 DB_PORT = int(os.environ.get("GIGANG_DB_PORT", "3306"))
@@ -27,6 +42,11 @@ SENSITIVE_TABLES = (
     "secret_key",
 )
 
+PORTAL_USERS = {
+    "sales_user": os.environ.get("GIGANG_SALES_PASSWORD"),
+    "report_user": os.environ.get("GIGANG_REPORT_PASSWORD"),
+}
+
 
 def check_api_key():
     provided_key = request.headers.get("X-API-Key")
@@ -43,6 +63,24 @@ def get_connection():
         port=DB_PORT,
         user=DB_USER,
         password=DB_PASSWORD,
+        charset="utf8mb4",
+        connection_timeout=10,
+        autocommit=True,
+    )
+
+
+def get_user_connection(user_name):
+    password = PORTAL_USERS.get(user_name)
+
+    if not password:
+        raise ValueError("허용되지 않은 사용자입니다.")
+
+    return mysql.connector.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=user_name,
+        password=password,
+        database="gigang_db",
         charset="utf8mb4",
         connection_timeout=10,
         autocommit=True,
@@ -142,12 +180,18 @@ def load_logs(limit=None, user_name=None):
                 table_counts[target_table],
             )
 
+            action = (
+                "EXCEL_DOWNLOAD"
+                if "GIGANG_EXCEL_DOWNLOAD" in query_string
+                else "DB_SELECT"
+            )
+
             logs.append(
                 {
                     "event_time": event_time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "user_name": db_user,
                     "src_ip": "127.0.0.1",
-                    "action": "DB_SELECT",
+                    "action": action,
                     "target_table": target_table,
                     "query_string": query_string,
                     "rows_affected": rows_affected,
@@ -217,12 +261,18 @@ def load_logs_since(after_time, limit=100):
                 table_counts[target_table],
             )
 
+            action = (
+                "EXCEL_DOWNLOAD"
+                if "GIGANG_EXCEL_DOWNLOAD" in query_string
+                else "DB_SELECT"
+            )
+
             logs.append(
                 {
                     "event_time": event_time.strftime("%Y-%m-%dT%H:%M:%S.%f"),
                     "user_name": db_user,
                     "src_ip": "127.0.0.1",
-                    "action": "DB_SELECT",
+                    "action": action,
                     "target_table": target_table,
                     "query_string": query_string,
                     "rows_affected": rows_affected,
@@ -359,6 +409,303 @@ def db_logs_since():
             "logs": logs,
         }
     )
+
+
+@app.route("/", methods=["GET"])
+def index():
+    if "portal_user" in session:
+        return redirect(url_for("db_portal"))
+
+    return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+
+        expected_password = PORTAL_USERS.get(username)
+
+        if expected_password and password == expected_password:
+            try:
+                connection = get_user_connection(username)
+                connection.close()
+
+                session.permanent = True
+                session["portal_user"] = username
+
+                return redirect(url_for("db_portal"))
+
+            except mysql.connector.Error:
+                error = "DB 계정 연결에 실패했습니다."
+        else:
+            error = "아이디 또는 비밀번호가 올바르지 않습니다."
+
+    return render_template(
+        "login.html",
+        error=error,
+    )
+
+
+@app.route("/db", methods=["GET"])
+def db_portal():
+    username = session.get("portal_user")
+
+    if not username:
+        return redirect(url_for("login"))
+
+    keyword = request.args.get("keyword", "").strip()
+    search_type = request.args.get("search_type", "name")
+
+    rows = []
+
+    if request.args.get("search") == "1":
+        connection = get_user_connection(username)
+
+        try:
+            cursor = connection.cursor()
+
+            if keyword:
+                if search_type == "id" and keyword.isdigit():
+                    cursor.execute(
+                        """
+                        SELECT
+                            user_id,
+                            customer_name,
+                            rrn,
+                            phone_number,
+                            email,
+                            address,
+                            account_number,
+                            credit_card_num,
+                            balance,
+                            customer_grade
+                        FROM customer_vault
+                        WHERE user_id = %s
+                        LIMIT 50
+                    """,
+                        (int(keyword),),
+                    )
+
+                else:
+                    cursor.execute(
+                        """
+                        SELECT
+                            user_id,
+                            customer_name,
+                            rrn,
+                            phone_number,
+                            email,
+                            address,
+                            account_number,
+                            credit_card_num,
+                            balance,
+                            customer_grade
+                        FROM customer_vault
+                        WHERE customer_name LIKE %s
+                        LIMIT 50
+                    """,
+                        ("%" + keyword + "%",),
+                    )
+
+            else:
+                cursor.execute("""
+                    SELECT
+                        user_id,
+                        customer_name,
+                        rrn,
+                        phone_number,
+                        email,
+                        address,
+                        account_number,
+                        credit_card_num,
+                        balance,
+                        customer_grade
+                    FROM customer_vault
+                    LIMIT 50
+                """)
+
+            rows = cursor.fetchall()
+
+        finally:
+            connection.close()
+
+    return render_template(
+        "db.html",
+        username=username,
+        rows=rows,
+        keyword=keyword,
+        search_type=search_type,
+    )
+
+
+@app.route("/db/download", methods=["GET"])
+def download_db_excel():
+    username = session.get("portal_user")
+
+    if not username:
+        return redirect(url_for("login"))
+
+    keyword = request.args.get("keyword", "").strip()
+    search_type = request.args.get("search_type", "name")
+
+    connection = get_user_connection(username)
+
+    try:
+        cursor = connection.cursor()
+
+        if keyword:
+            if search_type == "id":
+                if not keyword.isdigit():
+                    rows = []
+                else:
+                    cursor.execute(
+                        """
+                        SELECT /* GIGANG_EXCEL_DOWNLOAD */
+                            user_id,
+                            customer_name,
+                            rrn,
+                            phone_number,
+                            email,
+                            address,
+                            account_number,
+                            credit_card_num,
+                            balance,
+                            customer_grade
+                        FROM customer_vault
+                        WHERE user_id = %s
+                        LIMIT 50
+                    """,
+                        (int(keyword),),
+                    )
+
+                    rows = cursor.fetchall()
+
+            else:
+                cursor.execute(
+                    """
+                    SELECT /* GIGANG_EXCEL_DOWNLOAD */
+                        user_id,
+                        customer_name,
+                        rrn,
+                        phone_number,
+                        email,
+                        address,
+                        account_number,
+                        credit_card_num,
+                        balance,
+                        customer_grade
+                    FROM customer_vault
+                    WHERE customer_name LIKE %s
+                    LIMIT 50
+                """,
+                    ("%" + keyword + "%",),
+                )
+
+                rows = cursor.fetchall()
+
+        else:
+            cursor.execute("""
+                SELECT /* GIGANG_EXCEL_DOWNLOAD */
+                    user_id,
+                    customer_name,
+                    rrn,
+                    phone_number,
+                    email,
+                    address,
+                    account_number,
+                    credit_card_num,
+                    balance,
+                    customer_grade
+                FROM customer_vault
+                LIMIT 50
+            """)
+
+            rows = cursor.fetchall()
+
+    finally:
+        connection.close()
+
+    output = io.BytesIO()
+
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+
+    worksheet = workbook.add_worksheet("고객정보")
+
+    headers = [
+        "고객번호",
+        "고객명",
+        "주민등록번호",
+        "휴대전화",
+        "이메일",
+        "주소",
+        "계좌번호",
+        "신용카드번호",
+        "잔액",
+        "고객등급",
+    ]
+
+    header_format = workbook.add_format(
+        {
+            "bold": True,
+            "border": 1,
+            "align": "center",
+        }
+    )
+
+    money_format = workbook.add_format(
+        {
+            "num_format": "#,##0.00",
+        }
+    )
+
+    for col, header in enumerate(headers):
+        worksheet.write(0, col, header, header_format)
+
+    for row_index, row in enumerate(rows, start=1):
+        worksheet.write(row_index, 0, row[0])
+        worksheet.write(row_index, 1, row[1])
+        worksheet.write(row_index, 2, row[2])
+        worksheet.write(row_index, 3, row[3])
+        worksheet.write(row_index, 4, row[4])
+        worksheet.write(row_index, 5, row[5])
+        worksheet.write(row_index, 6, row[6])
+        worksheet.write(row_index, 7, row[7])
+        worksheet.write(row_index, 8, row[8], money_format)
+        worksheet.write(row_index, 9, row[9])
+
+    worksheet.set_column("A:A", 12)
+    worksheet.set_column("B:B", 18)
+    worksheet.set_column("C:C", 20)
+    worksheet.set_column("D:D", 18)
+    worksheet.set_column("E:E", 30)
+    worksheet.set_column("F:F", 36)
+    worksheet.set_column("G:H", 24)
+    worksheet.set_column("I:I", 15)
+    worksheet.set_column("J:J", 12)
+
+    workbook.close()
+
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="gigang_customer_data.xlsx",
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet"
+        ),
+    )
+
+
+@app.route("/logout", methods=["GET"])
+def logout():
+    session.clear()
+
+    return redirect(url_for("login"))
 
 
 @app.route("/viewer", methods=["GET"])
