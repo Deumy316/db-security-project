@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from export_access_log import COLUMNS, TARGET_USERS, is_business_select, save_csv
 
@@ -66,18 +67,29 @@ class ExportTests(unittest.TestCase):
         )
         self.assertFalse(is_business_select(log("UPDATE users SET name = 'test'")))
 
-    def test_csv_contains_only_business_rows_with_original_columns(self):
+    def test_csv_contains_only_sensitive_business_rows_with_audit_columns(self):
+        sql = "SELECT '한글, 값' AS note\nFROM customer_vault LIMIT 5"
         keep = [
-            log("SELECT '한글, 값' AS note\nFROM users", user) for user in TARGET_USERS
+            log(sql, user) for user in TARGET_USERS
         ]
-        rows = [log("select @@version_comment limit 1")] + keep
-        with tempfile.TemporaryDirectory() as directory:
+        rows = [log("select @@version_comment limit 1"), log("SELECT * FROM users")] + keep
+        expected_columns = [
+            "event_time", "user_name", "src_ip", "action",
+            "target_table", "query_string", "rows_affected",
+        ]
+        expected_rows = [
+            ["2026-09-10T12:00:00", user, "127.0.0.1", "DB_SELECT",
+             "customer_vault", sql, "5"]
+            for user in TARGET_USERS
+        ]
+        with patch("export_access_log.TABLE_ROW_COUNTS", {"customer_vault": 10}), \
+                tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "access_log.csv"
             self.assertEqual(save_csv(Cursor(rows), path), 3)
             with path.open(encoding="utf-8-sig", newline="") as source:
                 self.assertEqual(
                     list(csv.reader(source)),
-                    [list(COLUMNS)] + [list(row) for row in keep],
+                    [expected_columns] + expected_rows,
                 )
 
     def test_all_system_queries_produce_header_only(self):

@@ -48,7 +48,7 @@ PORTAL_USERS = {
 }
 
 # 부서별 포털 아이디. 로그인하면 그 부서 화면(view)만 보인다 (탭 없음).
-# MySQL 에는 db_user 계정으로 접속한다 → 감사 로그에는 db_user 로 남는다.
+# MySQL 에는 db_user 계정으로 접속하고 SQL 주석으로 포털 사용자를 구분한다.
 # 비밀번호 환경변수가 비어 있으면 그 아이디는 로그인할 수 없다.
 DEPT_ACCOUNTS = {
     "cs_user": {"password": os.environ.get("GIGANG_CS_PASSWORD"), "db_user": "sales_user", "view": "cs"},
@@ -56,6 +56,24 @@ DEPT_ACCOUNTS = {
     "fin_user": {"password": os.environ.get("GIGANG_FIN_PASSWORD"), "db_user": "sales_user", "view": "fin"},
     "dev_user": {"password": os.environ.get("GIGANG_DEV_PASSWORD"), "db_user": "sales_user", "view": "dev"},
 }
+
+
+ALLOWED_PORTAL_USERS = frozenset((*PORTAL_USERS, *DEPT_ACCOUNTS))
+PORTAL_USER_PREFIX = re.compile(
+    r"^\s*SELECT\s+(?:/\*\s*GIGANG_EXCEL_DOWNLOAD\s*\*/\s*)?"
+    r"/\*\s*GIGANG_PORTAL_USER=([a-z_]+)\s*\*/",
+    re.IGNORECASE,
+)
+
+
+def portal_user_from_query(query_string, db_user):
+    """문자열 값 속 가짜 주석을 피하도록 SELECT 바로 뒤의 표식만 읽는다."""
+    match = PORTAL_USER_PREFIX.match(query_string)
+    if match:
+        portal_user = match.group(1)
+        if portal_user in ALLOWED_PORTAL_USERS and db_user_for(portal_user) == db_user:
+            return portal_user
+    return None
 
 
 def portal_password(username):
@@ -192,8 +210,9 @@ def load_logs(limit=None, user_name=None):
 
         for event_time, user_host, query_string in rows:
             db_user = user_host.split("[", 1)[0].strip()
+            portal_user = portal_user_from_query(query_string, db_user)
 
-            if user_name and db_user != user_name:
+            if user_name and user_name not in (db_user, portal_user):
                 continue
 
             target_table = detect_target_table(query_string)
@@ -222,6 +241,8 @@ def load_logs(limit=None, user_name=None):
                 {
                     "event_time": event_time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "user_name": db_user,
+                    "portal_user": portal_user,
+                    "db_user": db_user,
                     "src_ip": "127.0.0.1",
                     "action": action,
                     "target_table": target_table,
@@ -276,6 +297,7 @@ def load_logs_since(after_time, limit=100):
 
         for event_time, user_host, query_string in rows:
             db_user = user_host.split("[", 1)[0].strip()
+            portal_user = portal_user_from_query(query_string, db_user)
 
             target_table = detect_target_table(query_string)
 
@@ -303,6 +325,8 @@ def load_logs_since(after_time, limit=100):
                 {
                     "event_time": event_time.strftime("%Y-%m-%dT%H:%M:%S.%f"),
                     "user_name": db_user,
+                    "portal_user": portal_user,
+                    "db_user": db_user,
                     "src_ip": "127.0.0.1",
                     "action": action,
                     "target_table": target_table,
@@ -545,10 +569,14 @@ def get_view(view_key):
 
 def fetch_customer_rows(username, view_key, keyword, search_type, excel=False):
     """화면(view)에 맞는 열만 조회해서 [열 순서대로 값] 목록을 돌려준다."""
+    if username not in ALLOWED_PORTAL_USERS:
+        raise ValueError("허용되지 않은 포털 사용자입니다.")
+
     columns = VIEWS[view_key][1]
     # 은행·계좌 형식을 만들려면 고객번호가 필요하므로 user_id 는 늘 조회한다
     sql_columns = ["user_id"] + [c for c in columns if c not in ("user_id", "bank")]
     marker = " /* GIGANG_EXCEL_DOWNLOAD */" if excel else ""
+    marker += f" /* GIGANG_PORTAL_USER={username} */"
     sql = f"SELECT{marker} {', '.join(sql_columns)} FROM customer_vault"
     params = ()
 
@@ -772,7 +800,8 @@ def viewer():
     <thead>
         <tr>
             <th>시간</th>
-            <th>사용자</th>
+            <th>포털 사용자</th>
+            <th>DB 사용자</th>
             <th>Action</th>
             <th>테이블</th>
             <th>조회량</th>
@@ -817,14 +846,13 @@ async function loadLogs() {
         data.logs.forEach(log => {
             const row = document.createElement("tr");
 
-            row.innerHTML = `
-                <td>${log.event_time}</td>
-                <td>${log.user_name}</td>
-                <td>${log.action}</td>
-                <td>${log.target_table}</td>
-                <td>${log.rows_affected}</td>
-                <td>${log.query_string}</td>
-            `;
+            [log.event_time, log.portal_user ?? "—", log.db_user ?? log.user_name,
+             log.action, log.target_table, log.rows_affected, log.query_string]
+                .forEach(value => {
+                    const cell = document.createElement("td");
+                    cell.textContent = value ?? "";
+                    row.appendChild(cell);
+                });
 
             body.appendChild(row);
         });

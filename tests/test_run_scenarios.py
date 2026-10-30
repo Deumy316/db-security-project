@@ -26,47 +26,49 @@ class ScenarioTests(unittest.TestCase):
             "S_N01": (
                 "sales_user",
                 "정상",
-                "SELECT * FROM gigang_db.users LIMIT 1;",
+                "SELECT user_id, customer_name FROM gigang_db.customer_vault LIMIT 1;",
                 5,
                 10,
             ),
             "S_N02": (
                 "sales_user",
                 "정상",
-                "SELECT * FROM gigang_db.users LIMIT 5;",
+                "SELECT user_id, customer_name, balance FROM gigang_db.customer_vault LIMIT 5;",
                 3,
                 20,
             ),
             "S_A01": (
                 "sales_user",
                 "비정상",
-                "SELECT * FROM gigang_db.users LIMIT 1;",
+                "SELECT user_id, customer_name, rrn, credit_card_num, balance "
+                "FROM gigang_db.customer_vault LIMIT 10;",
                 100,
                 0,
             ),
-            "S_A02": ("sales_user", "비정상", "SELECT * FROM gigang_db.users;", 5, 1),
+            "S_A02": ("sales_user", "비정상", "SELECT * FROM gigang_db.customer_vault;", 5, 1),
             "R_N01": (
                 "report_user",
                 "정상",
-                "SELECT COUNT(*) AS user_count FROM gigang_db.users;",
+                "SELECT COUNT(*) AS customer_count FROM gigang_db.customer_vault;",
                 3,
                 30,
             ),
             "R_N02": (
                 "report_user",
                 "정상",
-                "SELECT * FROM gigang_db.users LIMIT 10;",
+                "SELECT customer_name, balance FROM gigang_db.customer_vault LIMIT 10;",
                 3,
                 20,
             ),
             "R_A01": (
                 "report_user",
                 "비정상",
-                "SELECT COUNT(*) AS user_count FROM gigang_db.users;",
+                "SELECT user_id, customer_name, rrn, credit_card_num, balance "
+                "FROM gigang_db.customer_vault;",
                 100,
                 0,
             ),
-            "R_A02": ("report_user", "비정상", "SELECT * FROM gigang_db.users;", 5, 1),
+            "R_A02": ("report_user", "비정상", "SELECT * FROM gigang_db.customer_vault;", 5, 1),
         }
         self.assertEqual(set(runner.SCENARIOS), set(expected))
         for key, values in expected.items():
