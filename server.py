@@ -3,7 +3,6 @@ from flask import (
     jsonify,
     request,
     render_template,
-    render_template_string,
     redirect,
     url_for,
     session,
@@ -11,10 +10,13 @@ from flask import (
 )
 from datetime import datetime, timedelta
 import os
+import hmac
+import secrets
 import io
 import xlsxwriter
 import re
 import mysql.connector
+import audit_viewer
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("GIGANG_SECRET_KEY", "dev-only-secret")
@@ -27,6 +29,7 @@ DB_USER = os.environ.get("GIGANG_DB_USER", "gigang_reader")
 DB_PASSWORD = os.environ.get("GIGANG_DB_PASSWORD")
 
 API_KEY = os.environ.get("GIGANG_API_KEY")
+ADMIN_PASSWORD = os.environ.get("GIGANG_ADMIN_PASSWORD")
 
 TARGET_USERS = (
     "sales_user",
@@ -58,7 +61,7 @@ DEPT_ACCOUNTS = {
 }
 
 
-ALLOWED_PORTAL_USERS = frozenset((*PORTAL_USERS, *DEPT_ACCOUNTS))
+ALLOWED_PORTAL_USERS = frozenset((*PORTAL_USERS, *DEPT_ACCOUNTS, "admin_user"))
 PORTAL_USER_PREFIX = re.compile(
     r"^\s*SELECT\s+(?:/\*\s*GIGANG_EXCEL_DOWNLOAD\s*\*/\s*)?"
     r"/\*\s*GIGANG_PORTAL_USER=([a-z_]+)\s*\*/",
@@ -85,6 +88,8 @@ def portal_password(username):
 
 def db_user_for(username):
     """포털 아이디 → MySQL 계정. 기존 계정(sales_user 등)은 그대로."""
+    if username == "admin_user":
+        return "sales_user"
     if username in DEPT_ACCOUNTS:
         return DEPT_ACCOUNTS[username]["db_user"]
 
@@ -104,6 +109,16 @@ def check_api_key():
         return False
 
     return provided_key == API_KEY
+
+
+def is_viewer_admin():
+    auth = session.get("viewer_admin_auth")
+    if (not ADMIN_PASSWORD or session.get("portal_user") != "admin_user"
+            or not isinstance(auth, str) or len(auth) != 97):
+        return False
+    nonce, _, signature = auth.partition(":")
+    expected = hmac.new(ADMIN_PASSWORD.encode(), nonce.encode(), "sha256").hexdigest()
+    return len(nonce) == 32 and hmac.compare_digest(signature.encode(), expected.encode())
 
 
 def get_connection():
@@ -469,6 +484,8 @@ def db_logs_since():
 
 @app.route("/", methods=["GET"])
 def index():
+    if is_viewer_admin():
+        return redirect(url_for("viewer"))
     if "portal_user" in session:
         return redirect(url_for("db_portal"))
 
@@ -483,6 +500,18 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
+        if username == "admin_user":
+            if ADMIN_PASSWORD and hmac.compare_digest(password.encode(), ADMIN_PASSWORD.encode()):
+                session.clear()
+                session.permanent = True
+                session["portal_user"] = "admin_user"
+                # 포털 ID만 바꾸거나 기존 세션 서명 키만 알아도 관리자 권한은 얻지 못한다.
+                nonce = secrets.token_hex(16)
+                proof = hmac.new(ADMIN_PASSWORD.encode(), nonce.encode(), "sha256").hexdigest()
+                session["viewer_admin_auth"] = f"{nonce}:{proof}"
+                return redirect(url_for("viewer"))
+            return render_template("login.html", error="아이디 또는 비밀번호가 올바르지 않습니다.")
+
         expected_password = portal_password(username)
 
         if expected_password and password == expected_password:
@@ -490,6 +519,7 @@ def login():
                 connection = get_user_connection(username)
                 connection.close()
 
+                session.clear()
                 session.permanent = True
                 session["portal_user"] = username
 
@@ -623,6 +653,8 @@ def db_portal():
 
     if not username:
         return redirect(url_for("login"))
+    if username == "admin_user" and not is_viewer_admin():
+        return "Forbidden", 403
 
     keyword = request.args.get("keyword", "").strip()
     search_type = request.args.get("search_type", "name")
@@ -653,6 +685,8 @@ def download_db_excel():
 
     if not username:
         return redirect(url_for("login"))
+    if username == "admin_user" and not is_viewer_admin():
+        return "Forbidden", 403
 
     keyword = request.args.get("keyword", "").strip()
     search_type = request.args.get("search_type", "name")
@@ -715,158 +749,44 @@ def logout():
 
 @app.route("/viewer", methods=["GET"])
 def viewer():
-    return render_template_string("""
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>기강 DB Log Viewer</title>
+    if not session.get("portal_user"):
+        return redirect(url_for("login"))
+    if not is_viewer_admin():
+        return "Forbidden", 403
+    return render_template(
+        "viewer.html", portal_users=sorted(ALLOWED_PORTAL_USERS), db_users=TARGET_USERS,
+        username=session["portal_user"],
+    )
 
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #111827;
-            color: #f9fafb;
-            margin: 0;
-            padding: 30px;
-        }
 
-        h1 {
-            margin-bottom: 20px;
-        }
+@app.route("/api/viewer/db-logs", methods=["GET"])
+def viewer_db_logs():
+    if not session.get("portal_user"):
+        return jsonify({"error": "Unauthorized"}), 401
+    if not is_viewer_admin():
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        filters = audit_viewer.parse_filters(request.args, ALLOWED_PORTAL_USERS, TARGET_USERS)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
-        .controls {
-            margin-bottom: 20px;
-        }
-
-        input {
-            padding: 10px;
-            width: 320px;
-            margin-right: 8px;
-        }
-
-        button {
-            padding: 10px 16px;
-            cursor: pointer;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            font-size: 14px;
-        }
-
-        th, td {
-            border: 1px solid #374151;
-            padding: 8px;
-            text-align: left;
-        }
-
-        th {
-            background: #1f2937;
-        }
-
-        tr:nth-child(even) {
-            background: #172033;
-        }
-
-        .error {
-            color: #f87171;
-            margin-top: 15px;
-        }
-    </style>
-</head>
-
-<body>
-
-<h1>기강 DB Log Viewer</h1>
-
-<div class="controls">
-    <input
-        type="password"
-        id="apiKey"
-        placeholder="API Key 입력"
-    >
-
-    <button onclick="loadLogs()">
-        로그 조회
-    </button>
-</div>
-
-<div id="status"></div>
-
-<table>
-    <thead>
-        <tr>
-            <th>시간</th>
-            <th>포털 사용자</th>
-            <th>DB 사용자</th>
-            <th>Action</th>
-            <th>테이블</th>
-            <th>조회량</th>
-            <th>SQL</th>
-        </tr>
-    </thead>
-
-    <tbody id="logBody">
-    </tbody>
-</table>
-
-<script>
-async function loadLogs() {
-    const apiKey = document.getElementById("apiKey").value;
-    const status = document.getElementById("status");
-    const body = document.getElementById("logBody");
-
-    body.innerHTML = "";
-    status.innerHTML = "조회 중...";
-
-    try {
-        const response = await fetch(
-            "/api/db-logs/latest?limit=50",
-            {
-                headers: {
-                    "X-API-Key": apiKey
-                }
-            }
-        );
-
-        if (!response.ok) {
-            status.innerHTML =
-                '<div class="error">API Key가 올바르지 않습니다.</div>';
-            return;
-        }
-
-        const data = await response.json();
-
-        status.innerHTML =
-            "조회된 로그: " + data.count + "건";
-
-        data.logs.forEach(log => {
-            const row = document.createElement("tr");
-
-            [log.event_time, log.portal_user ?? "—", log.db_user ?? log.user_name,
-             log.action, log.target_table, log.rows_affected, log.query_string]
-                .forEach(value => {
-                    const cell = document.createElement("td");
-                    cell.textContent = value ?? "";
-                    row.appendChild(cell);
-                });
-
-            body.appendChild(row);
-        });
-
-    } catch (error) {
-        status.innerHTML =
-            '<div class="error">서버 연결 실패</div>';
-    }
-}
-</script>
-
-</body>
-</html>
-    """)
+    connection = None
+    try:
+        connection = get_connection()
+        data = audit_viewer.load_page(
+            connection, filters, target_users=TARGET_USERS,
+            portal_db_users={user: db_user_for(user) for user in ALLOWED_PORTAL_USERS},
+            tables=SENSITIVE_TABLES, prefix_pattern=PORTAL_USER_PREFIX.pattern,
+            table_counter=get_table_count, row_estimator=calculate_rows_affected,
+        )
+        response = jsonify(data)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except mysql.connector.Error:
+        return jsonify({"error": "Audit logs temporarily unavailable"}), 503
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 if __name__ == "__main__":

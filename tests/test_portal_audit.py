@@ -134,14 +134,21 @@ class PortalAuditTests(unittest.TestCase):
             self.assertEqual(logs[0]["action"], "EXCEL_DOWNLOAD")
 
     def test_viewer_has_separate_user_columns_and_safe_text_rendering(self):
-        response = self.client.get("/viewer")
+        with patch.object(server, "ADMIN_PASSWORD", "fixture-admin-password"):
+            self.client.post("/login", data={"username": "admin_user", "password": "fixture-admin-password"})
+            response = self.client.get("/viewer")
         html = response.get_data(as_text=True)
         self.assertIn("<th>포털 사용자</th>", html)
         self.assertIn("<th>DB 사용자</th>", html)
-        self.assertIn("log.portal_user", html)
-        self.assertIn("log.db_user", html)
-        self.assertIn("textContent", html)
-        self.assertNotIn("${log.query_string}", html)
+        with self.client.get("/static/viewer.js") as response:
+            script = response.get_data(as_text=True)
+        self.assertIn("log.portal_user", script)
+        self.assertIn("log.db_user", script)
+        self.assertIn("textContent", script)
+        self.assertNotIn("${log.query_string}", script)
+        self.assertNotIn("apiKey", script)
+        self.assertNotIn("X-API-Key", script)
+        self.assertIn('credentials: "same-origin"', script)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}GIGANG · 감사 로그 대시보드{% endblock %}
+{% block header_meta %}<span class="account">{{ username }} · 감사 관리자</span><a class="button small" href="{{ url_for('logout') }}">로그아웃</a>{% endblock %}
+{% block content %}
+<div class="page-heading">
+<div>
+<span class="eyebrow">AUDIT & ACCOUNTABILITY</span>
+<h1>감사 로그 대시보드</h1>
+<p>데이터 접근 이력을 조회하고 사용자별 활동을 확인합니다.</p>
+</div>
+<span class="badge neutral">READ ONLY · 조회 전용</span>
+</div>
+<div class="stats-grid" aria-label="현재 필터 기준 요약">
+<article class="stat">
+<span>총 감사 로그</span>
+<strong id="stat-total">—</strong>
+<small>현재 필터 기준</small>
+</article>
+<article class="stat">
+<span>일반 조회</span>
+<strong id="stat-select">—</strong>
+<small>DB_SELECT</small>
+</article>
+<article class="stat">
+<span>엑셀 다운로드</span>
+<strong id="stat-excel">—</strong>
+<small>EXCEL_DOWNLOAD</small>
+</article>
+<article class="stat">
+<span>포털 사용자</span>
+<strong id="stat-users">—</strong>
+<small>식별 가능한 사용자 수</small>
+</article>
+</div>
+<section class="panel filter-panel" aria-labelledby="filter-title">
+<div class="section-heading">
+<h2 id="filter-title">로그 필터</h2>
+<span class="muted">조건을 조합하여 조회</span>
+</div>
+<form id="filterForm" class="filter-grid">
+<label for="portal-user">포털 사용자<select id="portal-user" name="portal_user">
+<option value="">전체 포털 사용자</option>{% for user in portal_users %}<option value="{{ user }}">{{ user }}</option>{% endfor %}</select>
+</label>
+<label for="db-user">DB 사용자<select id="db-user" name="db_user">
+<option value="">전체 DB 사용자</option>{% for user in db_users %}<option value="{{ user }}">{{ user }}</option>{% endfor %}</select>
+</label>
+<label for="action">Action<select id="action" name="action">
+<option value="">전체 Action</option>
+<option value="DB_SELECT">DB_SELECT · 일반 조회</option>
+<option value="EXCEL_DOWNLOAD">EXCEL_DOWNLOAD · 엑셀 다운로드</option>
+</select>
+</label>
+<label for="legacy">기존 로그<select id="legacy" name="legacy">
+<option value="include">기존 로그 포함</option>
+<option value="exclude">기존 로그 숨김</option>
+<option value="only">기존 로그만 표시</option>
+</select>
+</label>
+<label for="start">시작 시간<input type="datetime-local" id="start" name="start" step="1">
+</label>
+<label for="end">종료 시간<input type="datetime-local" id="end" name="end" step="1">
+</label>
+<div class="filter-actions">
+<button type="button" class="button" id="resetFilters">필터 초기화</button>
+<button type="submit" class="button primary" id="applyFilters">로그 조회</button>
+</div>
+</form>
+<p class="page-note">시간은 MySQL 로그의 DB 세션 기준입니다. 식별 주석이 없는 과거 로그의 포털 사용자는 추정하지 않습니다.</p>
+</section>
+<section class="panel result-panel" aria-labelledby="logs-title">
+<div class="section-heading">
+<h2 id="logs-title">접근 이력</h2>
+<span class="muted">최신순 · 페이지당 50건</span>
+</div>
+<div id="status" class="viewer-status" role="status" aria-live="polite">필터를 선택하고 로그를 조회하세요.</div>
+<div class="table-scroll" tabindex="0" role="region" aria-label="감사 로그. 가로로 스크롤할 수 있습니다.">
+<table class="audit-table">
+<thead>
+<tr>
+<th>시간</th>
+<th>포털 사용자</th>
+<th>DB 사용자</th>
+<th>Action</th>
+<th>대상 테이블</th>
+<th>조회량</th>
+<th>SQL</th>
+</tr>
+</thead>
+<tbody id="logBody">
+</tbody>
+</table>
+</div>
+<div class="empty-state" id="logEmpty">
+<h3>감사 로그 조회를 시작하세요</h3>
+<p>현재 필터에 맞는 실제 로그와 집계만 표시됩니다.</p>
+</div>
+<nav class="pagination" aria-label="로그 페이지">
+<span id="pageInfo">조회 대기</span>
+<div class="page-controls">
+<button class="button small" id="prevPage" disabled>← 이전</button>
+<div id="pageNumbers" class="page-numbers">
+</div>
+<button class="button small" id="nextPage" disabled>다음 →</button>
+</div>
+</nav>
+</section>
+<p class="page-note">조회량은 기존 감사 API와 동일한 추정값입니다. 이 화면은 원본 감사 로그를 수정하거나 삭제하지 않습니다.</p>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='viewer.js') }}" defer>
+</script>{% endblock %}
