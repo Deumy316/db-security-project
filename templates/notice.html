@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}GIGANG · {{ notice.title }}{% endblock %}
+{% block content %}
+<article class="panel notice-detail" aria-labelledby="notice-heading">
+  <header class="notice-heading">
+    <span class="eyebrow">INTERNAL NOTICE</span>
+    <h1 id="notice-heading">{{ notice.title }}</h1>
+    <p class="muted">작성일 <time datetime="{{ notice.published_on }}">{{ notice.published_on }}</time> · 작성 부서 {{ notice.author }}</p>
+  </header>
+  <div class="notice-body">{% for paragraph in notice.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}</div>
+  <footer class="notice-footer"><a class="button" href="{{ url_for('portal_home') }}">← 홈으로</a></footer>
+</article>
+{% endblock %}

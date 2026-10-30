@@ -9,3 +9,4 @@ data/.access_log_*.tmp
 *.pyc
 .pytest_cache/
 data/mysql_audit_log.csv
+auth-audit/

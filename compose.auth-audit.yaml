@@ -1,0 +1,8 @@
+﻿# 기본 compose.yaml과 함께 적용하는 인증 감사 로그 영속 볼륨 설정
+services:
+  gigang-api:
+    volumes:
+      - auth-audit:/app/auth-audit
+
+volumes:
+  auth-audit:

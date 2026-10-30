@@ -17,6 +17,7 @@ import xlsxwriter
 import re
 import mysql.connector
 import audit_viewer
+from notices import NOTICES
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("GIGANG_SECRET_KEY", "dev-only-secret")
@@ -487,7 +488,7 @@ def index():
     if is_viewer_admin():
         return redirect(url_for("viewer"))
     if "portal_user" in session:
-        return redirect(url_for("db_portal"))
+        return redirect(url_for("portal_home"))
 
     return redirect(url_for("login"))
 
@@ -523,7 +524,7 @@ def login():
                 session.permanent = True
                 session["portal_user"] = username
 
-                return redirect(url_for("db_portal"))
+                return redirect(url_for("portal_home"))
 
             except mysql.connector.Error:
                 error = "DB 계정 연결에 실패했습니다."
@@ -645,6 +646,71 @@ def fetch_customer_rows(username, view_key, keyword, search_type, excel=False):
 
 def view_headers(view_key):
     return [(COLUMNS[c][0], COLUMNS[c][1]) for c in VIEWS[view_key][1]]
+
+
+def portal_profile(username):
+    view = fixed_view_for(username) or "all"
+    department = {
+        "cs_user": "고객지원", "hr_user": "인사", "fin_user": "재무·정산",
+        "dev_user": "개발/운영점검", "admin_user": "시스템 관리자",
+    }.get(username, "공통 업무")
+    return {"department": department, "headers": view_headers(view),
+            "full_access": fixed_view_for(username) is None,
+            "audit_access": username == "admin_user"}
+
+
+@app.route("/home", methods=["GET"])
+def portal_home():
+    username = session.get("portal_user")
+    if not username:
+        return redirect(url_for("login"))
+    if username not in ALLOWED_PORTAL_USERS or (username == "admin_user" and not is_viewer_admin()):
+        return "Forbidden", 403
+
+    activity = None
+    connection = None
+    try:
+        connection = get_connection()
+        filters = audit_viewer.parse_filters(
+            {"portal_user": username, "legacy": "exclude"}, ALLOWED_PORTAL_USERS, TARGET_USERS,
+        )
+        activity = audit_viewer.load_page(
+            connection, filters, target_users=TARGET_USERS,
+            portal_db_users={user: db_user_for(user) for user in ALLOWED_PORTAL_USERS},
+            tables=SENSITIVE_TABLES, prefix_pattern=PORTAL_USER_PREFIX.pattern,
+            table_counter=get_table_count, row_estimator=calculate_rows_affected,
+        )
+    except mysql.connector.Error:
+        pass  # 감사 조회 장애가 업무 포털 홈 접근을 막지 않도록 한다.
+    finally:
+        if connection is not None:
+            connection.close()
+
+    return render_template("home.html", username=username, profile=portal_profile(username),
+                           activity=activity, notices=NOTICES)
+
+
+@app.route("/notices/<slug>", methods=["GET"])
+def portal_notice(slug):
+    username = session.get("portal_user")
+    if not username:
+        return redirect(url_for("login"))
+    if username not in ALLOWED_PORTAL_USERS or (username == "admin_user" and not is_viewer_admin()):
+        return "Forbidden", 403
+    notice = NOTICES.get(slug)
+    if notice is None:
+        return "Not Found", 404
+    return render_template("notice.html", notice=notice)
+
+
+@app.route("/permissions", methods=["GET"])
+def portal_permissions():
+    username = session.get("portal_user")
+    if not username:
+        return redirect(url_for("login"))
+    if username not in ALLOWED_PORTAL_USERS or (username == "admin_user" and not is_viewer_admin()):
+        return "Forbidden", 403
+    return render_template("permissions.html", username=username, profile=portal_profile(username))
 
 
 @app.route("/db", methods=["GET"])
@@ -787,6 +853,16 @@ def viewer_db_logs():
     finally:
         if connection is not None:
             connection.close()
+
+
+try:
+    import auth_audit
+    auth_audit.register(app)
+except Exception:
+    try:
+        app.logger.warning("Authentication audit initialization failed; continuing without audit.")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

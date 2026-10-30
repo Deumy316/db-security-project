@@ -18,13 +18,17 @@
 <span>GIGANG<small>DATA SECURITY</small>
 </span>
 </a>
+{% if session.get('portal_user') %}
 <nav aria-label="서비스 메뉴">
-<a href="{{ url_for('db_portal') }}" {% if request.endpoint == 'db_portal' %}aria-current="page"{% endif %}>DB 포털</a>
+<a href="{{ url_for('portal_home') }}" {% if request.endpoint == 'portal_home' %}aria-current="page"{% endif %}>홈</a>
+<a href="{{ url_for('db_portal') }}" {% if request.endpoint == 'db_portal' %}aria-current="page"{% endif %}>고객정보 조회</a>
+<a href="{{ url_for('portal_permissions') }}" {% if request.endpoint == 'portal_permissions' %}aria-current="page"{% endif %}>내 권한</a>
 {% if session.get('portal_user') == 'admin_user' %}
 <a href="{{ url_for('viewer') }}" {% if request.endpoint == 'viewer' %}aria-current="page"{% endif %}>감사 로그</a>
 {% endif %}
 </nav>
-<div class="header-meta">{% block header_meta %}<span class="muted">사내 데이터 보안 시스템</span>{% endblock %}</div>
+<div class="header-meta">{% block header_meta %}<span class="account">{{ session['portal_user'] }}</span><a class="button small" href="{{ url_for('logout') }}">로그아웃</a>{% endblock %}</div>
+{% endif %}
 </header>
 <main id="main" class="page-shell">{% block content %}{% endblock %}</main>
 <footer class="app-footer">

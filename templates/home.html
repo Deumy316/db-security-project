@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}GIGANG · 사내 업무 포털{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><span class="eyebrow">INTERNAL WORKSPACE</span><h1>{{ username }}님, 환영합니다.</h1><p>오늘의 업무를 안전한 데이터 접근으로 시작하세요.</p></div>
+  <span class="badge">{{ profile.department }}</span>
+</div>
+<div class="home-grid">
+  <section class="panel" aria-labelledby="activity-title">
+    <div class="section-heading"><h2 id="activity-title">나의 최근 조회 활동</h2><span class="muted">최근 5건</span></div>
+    {% if activity is none %}<div class="home-content"><p class="muted" role="status">최근 활동을 불러오지 못했습니다. 고객정보 조회는 바로가기를 이용하세요.</p></div>
+    {% else %}
+    <div class="home-content activity-summary"><span>식별 가능한 내 감사 기록 <strong>{{ activity.summary.total }}건</strong></span><span class="muted">일반 조회 {{ activity.summary.db_select }} · 엑셀 다운로드 {{ activity.summary.excel_download }}</span></div>
+    {% if activity.logs %}<ul class="activity-list">{% for log in activity.logs[:5] %}<li><div><span class="badge {{ 'excel' if log.action == 'EXCEL_DOWNLOAD' else 'select' }}">{{ '엑셀 다운로드' if log.action == 'EXCEL_DOWNLOAD' else '고객정보 조회' }}</span><span class="mono">{{ log.target_table }}</span></div><time>{{ log.event_time|replace('T', ' ') }}</time></li>{% endfor %}</ul>
+    {% else %}<div class="home-content"><p class="muted">아직 표시할 조회 활동이 없습니다.</p></div>{% endif %}
+    <p class="home-content page-note">현재 포털 계정으로 식별된 기록만 표시합니다. 과거 식별 불가 로그는 포함하지 않습니다. 시간은 DB 세션 기준입니다.</p>
+    {% endif %}
+  </section>
+  <section class="panel home-notices" aria-labelledby="notice-title"><div class="section-heading"><h2 id="notice-title">사내 공지사항</h2><span class="muted">상시 이용 안내</span></div>
+    <ul class="notice-list">{% for slug, notice in notices.items() %}<li><a href="{{ url_for('portal_notice', slug=slug) }}"><strong>{{ notice.title }} <span aria-hidden="true">→</span></strong><p>{{ notice.summary }}</p></a></li>{% endfor %}</ul>
+  </section>
+  <section class="panel home-shortcuts" aria-labelledby="shortcuts-title">
+    <div class="section-heading"><h2 id="shortcuts-title">업무 바로가기</h2><span class="muted">{{ profile.department }} · {{ profile.headers|length }}개 정보 항목</span></div>
+    <div class="shortcut-grid">
+      <a class="shortcut-card" href="{{ url_for('db_portal') }}"><span class="eyebrow">DATA ACCESS</span><h3>고객정보 조회 <span aria-hidden="true">→</span></h3><p>현재 권한에 맞는 고객정보 검색 · 엑셀 다운로드</p></a>
+      <a class="shortcut-card" href="{{ url_for('portal_permissions') }}"><span class="eyebrow">MY ACCESS</span><h3>내 권한 확인 <span aria-hidden="true">→</span></h3><p>{% if profile.full_access %}전체 고객정보 및 부서별 화면의 접근 범위 확인{% else %}{{ profile.department }} 전용 화면의 조회 가능 항목 확인{% endif %}</p></a>
+    </div>
+    <p class="home-content page-note">{% if profile.audit_access %}시스템 관리자는 상단 메뉴에서 감사 로그도 확인할 수 있습니다.{% else %}고객정보 조회와 다운로드에는 현재 부서의 접근 권한이 적용됩니다.{% endif %}</p>
+  </section>
+  <section class="panel" aria-labelledby="system-title"><div class="section-heading"><h2 id="system-title">시스템 상태</h2><span class="muted">홈 접속 기준</span></div>
+    <dl class="system-list"><div><dt>포털 서비스</dt><dd>응답 정상</dd></div><div><dt>로그인 세션</dt><dd>인증됨</dd></div><div><dt>감사 로그 조회</dt><dd>{{ '확인 가능' if activity is not none else '확인 불가' }}</dd></div></dl>
+    <p class="home-content page-note">이 화면의 응답과 감사 로그 조회 결과입니다. 업무 DB 전체나 외부 SOC의 상태를 의미하지 않습니다.</p>
+  </section>
+  <section class="panel" aria-labelledby="security-title"><div class="section-heading"><h2 id="security-title">개인정보 보호 안내</h2><span class="badge neutral">AUDIT</span></div>
+    <div class="home-content"><h3>조회 기록은 감사 로그로 남습니다.</h3><p class="muted">고객정보 조회와 엑셀 다운로드는 포털 사용자 및 실제 DB 계정과 구분하여 기록됩니다. 승인된 업무 목적으로만 이용하고, 공용 단말에서는 사용 후 로그아웃해 주세요.</p><a href="{{ url_for('portal_permissions') }}">현재 계정의 정보 접근 범위 확인 →</a></div>
+  </section>
+</div>
+{% endblock %}

@@ -58,7 +58,7 @@ class ViewerAdminTests(unittest.TestCase):
         self.user_connection.assert_not_called()
         self.connect.assert_not_called()
 
-    def test_general_accounts_still_login_to_db_and_check_db_connection(self):
+    def test_general_accounts_login_to_home_and_check_db_connection(self):
         for username in server.ALLOWED_PORTAL_USERS - {"admin_user"}:
             with self.subTest(username=username):
                 client = server.app.test_client()
@@ -68,7 +68,7 @@ class ViewerAdminTests(unittest.TestCase):
                     context = patch.dict(server.PORTAL_USERS, {username: "fixture-portal-password"})
                 with context:
                     response = client.post("/login", data={"username": username, "password": "fixture-portal-password"})
-                self.assertEqual((response.status_code, response.location), (302, "/db"))
+                self.assertEqual((response.status_code, response.location), (302, "/home"))
                 self.user_connection.assert_called_with(username)
                 self.assertEqual(client.get("/viewer").status_code, 403)
 
@@ -105,7 +105,10 @@ class ViewerAdminTests(unittest.TestCase):
 
     def test_navigation_is_localized_and_audit_menu_is_admin_only(self):
         login_html = self.client.get("/login").get_data(as_text=True)
-        self.assertIn(">DB 포털</a>", login_html)
+        self.assertNotIn('aria-label="서비스 메뉴"', login_html)
+        for path in ("/home", "/db", "/permissions", "/viewer"):
+            self.assertNotIn(f'href="{path}"', login_html)
+        self.assertIn('aria-label="GIGANG 홈"', login_html)
         self.assertNotIn('href="/viewer"', login_html)
         for username in server.ALLOWED_PORTAL_USERS - {"admin_user"}:
             with self.subTest(username=username):
@@ -115,7 +118,7 @@ class ViewerAdminTests(unittest.TestCase):
                 response = self.client.get("/db")
                 self.assertEqual(response.status_code, 200)
                 html = response.get_data(as_text=True)
-                self.assertIn(">DB 포털</a>", html)
+                self.assertIn(">고객정보 조회</a>", html)
                 self.assertNotIn('href="/viewer"', html)
                 self.assertNotIn("Audit Viewer", html)
                 self.assertEqual(self.client.get("/viewer").status_code, 403)
@@ -125,7 +128,7 @@ class ViewerAdminTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
                 html = response.get_data(as_text=True)
-                self.assertIn(">DB 포털</a>", html)
+                self.assertIn(">고객정보 조회</a>", html)
                 self.assertIn(">감사 로그</a>", html)
                 self.assertIn('href="/viewer"', html)
                 self.assertNotIn("Audit Viewer", html)
@@ -210,7 +213,7 @@ class ViewerAdminTests(unittest.TestCase):
         with self.client.session_transaction() as session:
             session.clear()
             session["portal_user"] = "cs_user"
-        self.assertEqual(self.client.get("/").location, "/db")
+        self.assertEqual(self.client.get("/").location, "/home")
 
     def test_forged_identity_or_role_values_do_not_grant_admin(self):
         for proof in (None, True, {}, "forged", "a" * 32 + ":" + "0" * 64):
