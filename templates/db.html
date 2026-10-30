@@ -105,6 +105,25 @@
         th.sort-desc::after {
             content: " ▼";
         }
+
+        .tabs {
+            margin-top: 20px;
+            display: flex;
+            gap: 6px;
+        }
+
+        .tabs a {
+            padding: 8px 16px;
+            background: #1f2937;
+            color: #cbd5e1;
+            text-decoration: none;
+            border-radius: 3px 3px 0 0;
+        }
+
+        .tabs a.active {
+            background: #2563eb;
+            color: white;
+        }
     </style>
 </head>
 
@@ -135,15 +154,17 @@
 
             <input type="hidden" name="search" value="1">
 
+            <input type="hidden" name="view" value="{{ view }}">
+
             <button type="submit">
                 조회
             </button>
 
-            <a href="/db?search=1" class="all-button">
+            <a href="/db?search=1&view={{ view }}" class="all-button">
                 전체 조회
             </a>
 
-            <a href="/db/download?search_type={{ search_type }}&keyword={{ keyword }}" class="download-button">
+            <a href="/db/download?search_type={{ search_type }}&keyword={{ keyword }}&view={{ view }}" class="download-button">
                 엑셀 다운로드
             </a>
 
@@ -152,39 +173,34 @@
         <a href="/logout">로그아웃</a>
     </div>
 
+    {% if views %}
+    <div class="tabs">
+        {% for key, item in views.items() %}
+        <a href="/db?view={{ key }}{% if rows %}&search=1&search_type={{ search_type }}&keyword={{ keyword }}{% endif %}"
+           class="{% if key == view %}active{% endif %}">{{ item[0] }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="notice">
-        민감 고객정보 조회 결과 | 최대 50건 | 조회 건수: {{ rows|length }}건
+        {{ view_label }} 화면 | 민감 고객정보 조회 결과 | 최대 50건 | 조회 건수: {{ rows|length }}건
     </div>
 
     <table id="customerTable">
         <thead>
             <tr>
-                <th data-type="number">고객번호</th>
-                <th data-type="string">고객명</th>
-                <th data-type="string">주민등록번호</th>
-                <th data-type="string">휴대전화</th>
-                <th data-type="string">이메일</th>
-                <th data-type="string">주소</th>
-                <th data-type="string">계좌번호</th>
-                <th data-type="string">신용카드번호</th>
-                <th data-type="number">잔액</th>
-                <th data-type="grade">고객등급</th>
+                {% for header, kind in headers %}
+                <th data-type="{{ kind }}">{{ header }}</th>
+                {% endfor %}
             </tr>
         </thead>
 
         <tbody>
             {% for row in rows %}
             <tr>
-                <td>{{ row[0] }}</td>
-                <td>{{ row[1] }}</td>
-                <td>{{ row[2] }}</td>
-                <td>{{ row[3] }}</td>
-                <td>{{ row[4] }}</td>
-                <td>{{ row[5] }}</td>
-                <td>{{ row[6] }}</td>
-                <td>{{ row[7] }}</td>
-                <td>{{ row[8] }}</td>
-                <td>{{ row[9] }}</td>
+                {% for value in row %}
+                <td>{{ value }}</td>
+                {% endfor %}
             </tr>
             {% endfor %}
         </tbody>

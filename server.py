@@ -47,6 +47,37 @@ PORTAL_USERS = {
     "report_user": os.environ.get("GIGANG_REPORT_PASSWORD"),
 }
 
+# 부서별 포털 아이디. 로그인하면 그 부서 화면(view)만 보인다 (탭 없음).
+# MySQL 에는 db_user 계정으로 접속한다 → 감사 로그에는 db_user 로 남는다.
+# 비밀번호 환경변수가 비어 있으면 그 아이디는 로그인할 수 없다.
+DEPT_ACCOUNTS = {
+    "cs_user": {"password": os.environ.get("GIGANG_CS_PASSWORD"), "db_user": "sales_user", "view": "cs"},
+    "hr_user": {"password": os.environ.get("GIGANG_HR_PASSWORD"), "db_user": "sales_user", "view": "hr"},
+    "fin_user": {"password": os.environ.get("GIGANG_FIN_PASSWORD"), "db_user": "sales_user", "view": "fin"},
+    "dev_user": {"password": os.environ.get("GIGANG_DEV_PASSWORD"), "db_user": "sales_user", "view": "dev"},
+}
+
+
+def portal_password(username):
+    if username in DEPT_ACCOUNTS:
+        return DEPT_ACCOUNTS[username]["password"]
+
+    return PORTAL_USERS.get(username)
+
+
+def db_user_for(username):
+    """포털 아이디 → MySQL 계정. 기존 계정(sales_user 등)은 그대로."""
+    if username in DEPT_ACCOUNTS:
+        return DEPT_ACCOUNTS[username]["db_user"]
+
+    return username
+
+
+def fixed_view_for(username):
+    """부서 아이디면 그 부서 화면, 기존 계정이면 None (탭으로 모든 화면)."""
+    account = DEPT_ACCOUNTS.get(username)
+    return account["view"] if account else None
+
 
 def check_api_key():
     provided_key = request.headers.get("X-API-Key")
@@ -70,6 +101,7 @@ def get_connection():
 
 
 def get_user_connection(user_name):
+    user_name = db_user_for(user_name)
     password = PORTAL_USERS.get(user_name)
 
     if not password:
@@ -427,7 +459,7 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
-        expected_password = PORTAL_USERS.get(username)
+        expected_password = portal_password(username)
 
         if expected_password and password == expected_password:
             try:
@@ -450,6 +482,113 @@ def login():
     )
 
 
+# 부서별 조회 화면. 화면마다 업무에 필요한 열만 보여 준다 (엑셀 다운로드도 같은 열).
+# 값: (탭 이름, 열 목록). 열 = (키, 머리글, 정렬 종류). "bank" 는 DB 열이 아니라 화면에서 만든다.
+VIEWS = {
+    "all": ("전체", ["user_id", "customer_name", "rrn", "phone_number", "email", "address",
+                   "bank", "account_number", "credit_card_num", "balance", "customer_grade"]),
+    "cs": ("고객지원", ["user_id", "customer_name", "phone_number", "email", "address", "customer_grade"]),
+    "hr": ("인사", ["user_id", "customer_name", "rrn", "phone_number", "email", "address",
+                  "bank", "account_number"]),
+    "fin": ("재무·정산", ["user_id", "customer_name", "bank", "account_number", "credit_card_num",
+                       "balance", "customer_grade"]),
+    # 개발: 운영 장애 점검용으로 전체 열을 본다 (개발자가 고객정보를 반출하면 DEV-1 로 잡히는 시연용)
+    "dev": ("개발(운영 점검)", ["user_id", "customer_name", "rrn", "phone_number", "email", "address",
+                           "bank", "account_number", "credit_card_num", "balance", "customer_grade"]),
+}
+
+COLUMNS = {
+    "user_id": ("고객번호", "number"),
+    "customer_name": ("고객명", "string"),
+    "rrn": ("주민등록번호", "string"),
+    "phone_number": ("휴대전화", "string"),
+    "email": ("이메일", "string"),
+    "address": ("주소", "string"),
+    "bank": ("은행", "string"),
+    "account_number": ("계좌번호", "string"),
+    "credit_card_num": ("신용카드번호", "string"),
+    "balance": ("잔액", "number"),
+    "customer_grade": ("고객등급", "grade"),
+}
+
+# 계좌번호는 DB에 숫자 14자리로 저장돼 있다. 화면·엑셀에 낼 때 고객마다 은행을 정하고
+# 그 은행의 실제 하이픈 형식으로 보여 준다 (실제 시스템도 하이픈은 표시할 때 붙인다).
+BANKS = (
+    ("국민은행", (6, 2, 6)),
+    ("하나은행", (3, 6, 5)),
+    ("기업은행", (3, 6, 2, 3)),
+)
+
+
+def bank_for(user_id):
+    return BANKS[int(user_id) % len(BANKS)]
+
+
+def format_account(user_id, account_number):
+    digits = re.sub(r"\D", "", str(account_number or ""))
+    _, parts = bank_for(user_id)
+
+    if len(digits) != sum(parts):
+        return account_number
+
+    pieces, pos = [], 0
+    for size in parts:
+        pieces.append(digits[pos:pos + size])
+        pos += size
+
+    return "-".join(pieces)
+
+
+def get_view(view_key):
+    return view_key if view_key in VIEWS else "all"
+
+
+def fetch_customer_rows(username, view_key, keyword, search_type, excel=False):
+    """화면(view)에 맞는 열만 조회해서 [열 순서대로 값] 목록을 돌려준다."""
+    columns = VIEWS[view_key][1]
+    # 은행·계좌 형식을 만들려면 고객번호가 필요하므로 user_id 는 늘 조회한다
+    sql_columns = ["user_id"] + [c for c in columns if c not in ("user_id", "bank")]
+    marker = " /* GIGANG_EXCEL_DOWNLOAD */" if excel else ""
+    sql = f"SELECT{marker} {', '.join(sql_columns)} FROM customer_vault"
+    params = ()
+
+    if keyword:
+        if search_type == "id" and keyword.isdigit():
+            sql += " WHERE user_id = %s"
+            params = (int(keyword),)
+        elif search_type == "id" and excel:
+            return []   # 원래 동작: 엑셀은 숫자 아닌 고객번호면 빈 파일, 화면은 이름 검색으로 처리
+        else:
+            sql += " WHERE customer_name LIKE %s"
+            params = ("%" + keyword + "%",)
+
+    sql += " LIMIT 50"
+
+    connection = get_user_connection(username)
+
+    try:
+        cursor = connection.cursor()
+        cursor.execute(sql, params)
+        fetched = cursor.fetchall()
+    finally:
+        connection.close()
+
+    rows = []
+    for record in fetched:
+        values = dict(zip(sql_columns, record))
+        user_id = values["user_id"]
+        values["bank"] = bank_for(user_id)[0]
+        if "account_number" in values:
+            values["account_number"] = format_account(user_id, values["account_number"])
+        rows.append([values[c] for c in columns])
+
+    return rows
+
+
+def view_headers(view_key):
+    return [(COLUMNS[c][0], COLUMNS[c][1]) for c in VIEWS[view_key][1]]
+
+
 @app.route("/db", methods=["GET"])
 def db_portal():
     username = session.get("portal_user")
@@ -459,79 +598,13 @@ def db_portal():
 
     keyword = request.args.get("keyword", "").strip()
     search_type = request.args.get("search_type", "name")
+    fixed_view = fixed_view_for(username)
+    view = fixed_view or get_view(request.args.get("view", "all"))
 
     rows = []
 
     if request.args.get("search") == "1":
-        connection = get_user_connection(username)
-
-        try:
-            cursor = connection.cursor()
-
-            if keyword:
-                if search_type == "id" and keyword.isdigit():
-                    cursor.execute(
-                        """
-                        SELECT
-                            user_id,
-                            customer_name,
-                            rrn,
-                            phone_number,
-                            email,
-                            address,
-                            account_number,
-                            credit_card_num,
-                            balance,
-                            customer_grade
-                        FROM customer_vault
-                        WHERE user_id = %s
-                        LIMIT 50
-                    """,
-                        (int(keyword),),
-                    )
-
-                else:
-                    cursor.execute(
-                        """
-                        SELECT
-                            user_id,
-                            customer_name,
-                            rrn,
-                            phone_number,
-                            email,
-                            address,
-                            account_number,
-                            credit_card_num,
-                            balance,
-                            customer_grade
-                        FROM customer_vault
-                        WHERE customer_name LIKE %s
-                        LIMIT 50
-                    """,
-                        ("%" + keyword + "%",),
-                    )
-
-            else:
-                cursor.execute("""
-                    SELECT
-                        user_id,
-                        customer_name,
-                        rrn,
-                        phone_number,
-                        email,
-                        address,
-                        account_number,
-                        credit_card_num,
-                        balance,
-                        customer_grade
-                    FROM customer_vault
-                    LIMIT 50
-                """)
-
-            rows = cursor.fetchall()
-
-        finally:
-            connection.close()
+        rows = fetch_customer_rows(username, view, keyword, search_type)
 
     return render_template(
         "db.html",
@@ -539,6 +612,10 @@ def db_portal():
         rows=rows,
         keyword=keyword,
         search_type=search_type,
+        view=view,
+        view_label=VIEWS[view][0],
+        views={} if fixed_view else VIEWS,   # 부서 아이디는 탭 없이 자기 화면만
+        headers=view_headers(view),
     )
 
 
@@ -551,102 +628,16 @@ def download_db_excel():
 
     keyword = request.args.get("keyword", "").strip()
     search_type = request.args.get("search_type", "name")
+    view = fixed_view_for(username) or get_view(request.args.get("view", "all"))
 
-    connection = get_user_connection(username)
-
-    try:
-        cursor = connection.cursor()
-
-        if keyword:
-            if search_type == "id":
-                if not keyword.isdigit():
-                    rows = []
-                else:
-                    cursor.execute(
-                        """
-                        SELECT /* GIGANG_EXCEL_DOWNLOAD */
-                            user_id,
-                            customer_name,
-                            rrn,
-                            phone_number,
-                            email,
-                            address,
-                            account_number,
-                            credit_card_num,
-                            balance,
-                            customer_grade
-                        FROM customer_vault
-                        WHERE user_id = %s
-                        LIMIT 50
-                    """,
-                        (int(keyword),),
-                    )
-
-                    rows = cursor.fetchall()
-
-            else:
-                cursor.execute(
-                    """
-                    SELECT /* GIGANG_EXCEL_DOWNLOAD */
-                        user_id,
-                        customer_name,
-                        rrn,
-                        phone_number,
-                        email,
-                        address,
-                        account_number,
-                        credit_card_num,
-                        balance,
-                        customer_grade
-                    FROM customer_vault
-                    WHERE customer_name LIKE %s
-                    LIMIT 50
-                """,
-                    ("%" + keyword + "%",),
-                )
-
-                rows = cursor.fetchall()
-
-        else:
-            cursor.execute("""
-                SELECT /* GIGANG_EXCEL_DOWNLOAD */
-                    user_id,
-                    customer_name,
-                    rrn,
-                    phone_number,
-                    email,
-                    address,
-                    account_number,
-                    credit_card_num,
-                    balance,
-                    customer_grade
-                FROM customer_vault
-                LIMIT 50
-            """)
-
-            rows = cursor.fetchall()
-
-    finally:
-        connection.close()
+    rows = fetch_customer_rows(username, view, keyword, search_type, excel=True)
+    headers = view_headers(view)
 
     output = io.BytesIO()
 
     workbook = xlsxwriter.Workbook(output, {"in_memory": True})
 
     worksheet = workbook.add_worksheet("고객정보")
-
-    headers = [
-        "고객번호",
-        "고객명",
-        "주민등록번호",
-        "휴대전화",
-        "이메일",
-        "주소",
-        "계좌번호",
-        "신용카드번호",
-        "잔액",
-        "고객등급",
-    ]
 
     header_format = workbook.add_format(
         {
@@ -662,30 +653,16 @@ def download_db_excel():
         }
     )
 
-    for col, header in enumerate(headers):
+    for col, (header, _) in enumerate(headers):
         worksheet.write(0, col, header, header_format)
+        worksheet.set_column(col, col, 36 if header == "주소" else 30 if header == "이메일" else 20)
 
     for row_index, row in enumerate(rows, start=1):
-        worksheet.write(row_index, 0, row[0])
-        worksheet.write(row_index, 1, row[1])
-        worksheet.write(row_index, 2, row[2])
-        worksheet.write(row_index, 3, row[3])
-        worksheet.write(row_index, 4, row[4])
-        worksheet.write(row_index, 5, row[5])
-        worksheet.write(row_index, 6, row[6])
-        worksheet.write(row_index, 7, row[7])
-        worksheet.write(row_index, 8, row[8], money_format)
-        worksheet.write(row_index, 9, row[9])
-
-    worksheet.set_column("A:A", 12)
-    worksheet.set_column("B:B", 18)
-    worksheet.set_column("C:C", 20)
-    worksheet.set_column("D:D", 18)
-    worksheet.set_column("E:E", 30)
-    worksheet.set_column("F:F", 36)
-    worksheet.set_column("G:H", 24)
-    worksheet.set_column("I:I", 15)
-    worksheet.set_column("J:J", 12)
+        for col, value in enumerate(row):
+            if headers[col][0] == "잔액":
+                worksheet.write(row_index, col, value, money_format)
+            else:
+                worksheet.write(row_index, col, value)
 
     workbook.close()
 
@@ -694,7 +671,7 @@ def download_db_excel():
     return send_file(
         output,
         as_attachment=True,
-        download_name="gigang_customer_data.xlsx",
+        download_name="gigang_customer_data.xlsx" if view == "all" else f"gigang_customer_data_{view}.xlsx",
         mimetype=(
             "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet"
         ),
