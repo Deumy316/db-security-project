@@ -855,6 +855,29 @@ def viewer_db_logs():
             connection.close()
 
 
+@app.route("/api/viewer/auth-events", methods=["GET"])
+def viewer_auth_events():
+    if not session.get("portal_user"):
+        return jsonify({"error": "Unauthorized"}), 401
+    if not is_viewer_admin():
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        import auth_events_viewer
+    except Exception:
+        return jsonify({"error": "Authentication audit temporarily unavailable"}), 503
+    try:
+        filters = auth_events_viewer.parse_filters(request.args)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    try:
+        data = auth_events_viewer.load_page(app.config.get("AUTH_AUDIT_PATH"), filters)
+    except Exception:
+        return jsonify({"error": "Authentication audit temporarily unavailable"}), 503
+    response = jsonify(data)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 try:
     import auth_audit
     auth_audit.register(app)

@@ -10,6 +10,11 @@
 </div>
 <span class="badge neutral">READ ONLY · 조회 전용</span>
 </div>
+<div class="viewer-tabs" role="tablist" aria-label="감사 이력 선택">
+<button type="button" role="tab" id="dbAuditTab" aria-controls="dbAuditPanel" aria-selected="true">DB 접근 이력</button>
+<button type="button" role="tab" id="authAuditTab" aria-controls="authAuditPanel" aria-selected="false" tabindex="-1">로그인 이력</button>
+</div>
+<div id="dbAuditPanel" role="tabpanel" aria-labelledby="dbAuditTab">
 <div class="stats-grid" aria-label="현재 필터 기준 요약">
 <article class="stat">
 <span>총 감사 로그</span>
@@ -105,6 +110,10 @@
 </nav>
 </section>
 <p class="page-note">조회량은 기존 감사 API와 동일한 추정값입니다. 이 화면은 원본 감사 로그를 수정하거나 삭제하지 않습니다.</p>
+</div>
+<div id="authAuditPanel" role="tabpanel" aria-labelledby="authAuditTab" hidden>
+{% include 'auth_events_panel.html' %}
+</div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='viewer.js') }}" defer>
-</script>{% endblock %}
+</script><script src="{{ url_for('static', filename='auth-events.js') }}" defer></script>{% endblock %}

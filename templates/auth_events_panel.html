@@ -1,0 +1,20 @@
+<section class="panel filter-panel" aria-labelledby="auth-filter-title">
+  <div class="section-heading"><h2 id="auth-filter-title">로그인 이력 필터</h2><span class="muted">인증 감사 전용 · 읽기 전용</span></div>
+  <form id="authFilterForm" class="filter-grid">
+    <label for="authUser">포털 사용자<input id="authUser" name="portal_user" list="authUserOptions" maxlength="128" placeholder="전체 또는 로그인 ID 입력"></label>
+    <datalist id="authUserOptions">{% for user in portal_users %}<option value="{{ user }}"></option>{% endfor %}</datalist>
+    <label for="authEventType">이벤트<select id="authEventType" name="event_type"><option value="">전체</option><option value="LOGIN_SUCCESS">LOGIN_SUCCESS · 로그인 성공</option><option value="LOGIN_FAILED">LOGIN_FAILED · 로그인 실패</option><option value="LOGOUT">LOGOUT · 로그아웃</option></select></label>
+    <div class="filter-actions"><button class="button" type="button" id="authReset">필터 초기화</button><button class="button primary" type="submit" id="authApply">로그인 이력 조회</button></div>
+  </form>
+  <p class="page-note">실패한 로그인에 입력된 미등록 계정명도 검색할 수 있습니다. 시간은 한국 시간(KST)으로 표시합니다.</p>
+</section>
+<section class="panel result-panel" aria-labelledby="auth-events-title">
+  <div class="section-heading"><h2 id="auth-events-title">로그인 이력</h2><span class="muted">최신 기록순 · 페이지당 50건 · KST</span></div>
+  <div id="authStatus" class="viewer-status" role="status" aria-live="polite">로그인 이력 탭을 선택하면 조회합니다.</div>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="로그인 감사 이력. 가로로 스크롤할 수 있습니다.">
+    <table class="auth-events-table"><thead><tr><th>시간(KST)</th><th>포털 사용자</th><th>이벤트</th><th>직접 연결 IP</th><th>전달 IP(미신뢰)</th><th>User-Agent</th><th>session_id(앞 12자리)</th></tr></thead><tbody id="authEventBody"></tbody></table>
+  </div>
+  <div class="empty-state" id="authEmpty"><h3>로그인 이력 조회 대기</h3><p>현재 필터에 맞는 실제 인증 이벤트만 표시합니다.</p></div>
+  <nav class="pagination" aria-label="로그인 이력 페이지"><span id="authPageInfo">조회 대기</span><div class="page-controls"><button class="button small" id="authPrev" disabled>← 이전</button><div class="page-numbers" id="authPageNumbers"></div><button class="button small" id="authNext" disabled>다음 →</button></div></nav>
+</section>
+<p class="page-note">직접 연결 IP는 Docker·프록시의 주소일 수 있습니다. 전달 IP는 검증되지 않은 헤더 정보이며 실제 이용자 IP나 신원으로 단정하지 않습니다. session_id는 앞부분만 표시하며 인증에 사용할 수 없습니다.</p>
